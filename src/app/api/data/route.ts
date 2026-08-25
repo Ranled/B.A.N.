@@ -1,23 +1,11 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createAdminClient } from '@/lib/supabase/admin';
-import { createClient as createServerClient } from '@/lib/supabase/server';
 import { CDEvent, Announcement, Reminder, Note, Profile, Notification, DashboardStats } from '@/types';
 
 export const dynamic = 'force-dynamic';
 
 export async function GET(request: NextRequest) {
   try {
-    // Check for authorization (ban_access cookie or Supabase auth session)
-    const accessCookie = request.cookies.get('ban_access')?.value?.toUpperCase();
-    const isCodeAuth = ['CD01', 'CDADMIN01', 'MASTER'].includes(accessCookie || '');
-
-    const serverSupabase = await createServerClient();
-    const { data: { user } } = await serverSupabase.auth.getUser();
-
-    if (!user && !isCodeAuth) {
-      return NextResponse.json({ error: 'Unauthorized. CD TRACK member access required.' }, { status: 401 });
-    }
-
     const supabase = createAdminClient();
 
     // Query all tables in parallel
