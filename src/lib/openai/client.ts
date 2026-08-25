@@ -2,7 +2,7 @@ import OpenAI from 'openai';
 import { DashboardStats } from '@/types';
 
 export const openai = new OpenAI({
-  apiKey: process.env.OPENAI_API_KEY,
+  apiKey: process.env.OPENAI_API_KEY || 'sk-placeholder-key-for-build',
 });
 
 export const OPENAI_MODEL = process.env.OPENAI_MODEL || 'gpt-4o-mini';
