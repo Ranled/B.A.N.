@@ -49,7 +49,13 @@ interface SpeechRecognitionInstance extends EventTarget {
 
 type SpeechRecognitionConstructor = new () => SpeechRecognitionInstance;
 
-export type OpenAIVoice = 'onyx' | 'alloy' | 'echo' | 'fable' | 'nova' | 'shimmer';
+export interface AvailableVoice {
+  id: string;
+  name: string;
+  lang: string;
+  isNatural: boolean;
+  isDefault: boolean;
+}
 
 /**
  * Prepares conversational text for speech synthesis so it sounds natural,
@@ -92,8 +98,10 @@ export function useVoice(onTranscript?: (text: string) => void) {
   const [voiceState, setVoiceState] = useState<VoiceState>('idle');
   const [transcript, setTranscript] = useState('');
   const [amplitude, setAmplitude] = useState(0);
-  const [selectedVoice, setSelectedVoice] = useState<OpenAIVoice>('onyx');
-  const [voicesLoaded, setVoicesLoaded] = useState(false);
+  const [availableVoices, setAvailableVoices] = useState<AvailableVoice[]>([]);
+  const [selectedVoiceId, setSelectedVoiceId] = useState<string>('');
+  const [rate, setRate] = useState<number>(1.0);
+  const [pitch, setPitch] = useState<number>(1.0);
 
   const recognitionRef = useRef<SpeechRecognitionInstance | null>(null);
   const audioContextRef = useRef<AudioContext | null>(null);
@@ -105,16 +113,81 @@ export function useVoice(onTranscript?: (text: string) => void) {
   const isListeningRef = useRef(false);
   const browserVoicesRef = useRef<SpeechSynthesisVoice[]>([]);
 
-  // Load and cache browser voices
+  // Discover and categorize all available system voices
   useEffect(() => {
     function loadVoices() {
-      if (typeof window !== 'undefined' && window.speechSynthesis) {
-        const voices = window.speechSynthesis.getVoices();
-        if (voices.length > 0) {
-          browserVoicesRef.current = voices;
-          setVoicesLoaded(true);
+      if (typeof window === 'undefined' || !window.speechSynthesis) return;
+
+      const rawVoices = window.speechSynthesis.getVoices();
+      if (rawVoices.length === 0) return;
+
+      browserVoicesRef.current = rawVoices;
+
+      // Filter and map voices, prioritizing English and natural voices
+      const mapped: AvailableVoice[] = rawVoices
+        .filter(v => v.lang.startsWith('en') || v.lang.startsWith('fil') || v.lang.startsWith('tl'))
+        .map(v => {
+          const isNatural =
+            v.name.includes('Natural') ||
+            v.name.includes('Online') ||
+            v.name.includes('Neural') ||
+            v.name.includes('Google') ||
+            v.name.includes('Enhanced') ||
+            v.name.includes('Siri');
+
+          return {
+            id: v.voiceURI || v.name,
+            name: v.name.replace(/(Microsoft|Google|Apple)\s*/gi, '$1: '),
+            lang: v.lang,
+            isNatural,
+            isDefault: v.default,
+          };
+        });
+
+      // If no English voices matched, fallback to all voices
+      const finalVoices = mapped.length > 0
+        ? mapped
+        : rawVoices.map(v => ({
+            id: v.voiceURI || v.name,
+            name: v.name,
+            lang: v.lang,
+            isNatural: false,
+            isDefault: v.default,
+          }));
+
+      // Sort natural/neural voices first
+      finalVoices.sort((a, b) => {
+        if (a.isNatural && !b.isNatural) return -1;
+        if (!a.isNatural && b.isNatural) return 1;
+        return a.name.localeCompare(b.name);
+      });
+
+      setAvailableVoices(finalVoices);
+
+      // Restore saved voice from localStorage or pick the best natural voice
+      const saved = localStorage.getItem('ban_voice_id');
+      if (saved && finalVoices.some(v => v.id === saved)) {
+        setSelectedVoiceId(saved);
+      } else {
+        const bestNatural = finalVoices.find(v =>
+          v.name.includes('Christopher') ||
+          v.name.includes('Jenny') ||
+          v.name.includes('Google') ||
+          v.name.includes('Daniel') ||
+          v.name.includes('Guy') ||
+          v.isNatural
+        ) || finalVoices[0];
+
+        if (bestNatural) {
+          setSelectedVoiceId(bestNatural.id);
         }
       }
+
+      // Restore rate and pitch
+      const savedRate = localStorage.getItem('ban_voice_rate');
+      if (savedRate) setRate(parseFloat(savedRate));
+      const savedPitch = localStorage.getItem('ban_voice_pitch');
+      if (savedPitch) setPitch(parseFloat(savedPitch));
     }
 
     loadVoices();
@@ -127,6 +200,21 @@ export function useVoice(onTranscript?: (text: string) => void) {
       stopSpeaking();
     };
   }, []);
+
+  function handleSetVoice(id: string) {
+    setSelectedVoiceId(id);
+    localStorage.setItem('ban_voice_id', id);
+  }
+
+  function handleSetRate(val: number) {
+    setRate(val);
+    localStorage.setItem('ban_voice_rate', val.toString());
+  }
+
+  function handleSetPitch(val: number) {
+    setPitch(val);
+    localStorage.setItem('ban_voice_pitch', val.toString());
+  }
 
   function getSpeechRecognition(): SpeechRecognitionConstructor | null {
     if (typeof window === 'undefined') return null;
@@ -296,7 +384,9 @@ export function useVoice(onTranscript?: (text: string) => void) {
     setAmplitude(0);
   }, []);
 
-  // Web Speech API Fallback with natural human voice selection & sentence splitting
+  /**
+   * Speaks text using the user's chosen system/browser voice, pitch, and speed.
+   */
   const speakWithBrowser = useCallback((text: string, onEnd?: () => void) => {
     if (typeof window === 'undefined' || !window.speechSynthesis) {
       onEnd?.();
@@ -311,38 +401,36 @@ export function useVoice(onTranscript?: (text: string) => void) {
     }
 
     const utt = new SpeechSynthesisUtterance(clean);
-    const voices = browserVoicesRef.current.length > 0
+    const rawVoices = browserVoicesRef.current.length > 0
       ? browserVoicesRef.current
       : window.speechSynthesis.getVoices();
 
-    // Priority ranking for natural, expressive voices across operating systems
-    const preferredVoice = voices.find(v =>
-      v.name.includes('Natural') ||
-      v.name.includes('Online (Natural)') ||
-      v.name.includes('Neural') ||
+    // Match exact user selected voice by ID or name
+    const chosenVoice = rawVoices.find(v =>
+      (v.voiceURI && v.voiceURI === selectedVoiceId) ||
+      v.name === selectedVoiceId
+    ) || rawVoices.find(v =>
       v.name.includes('Christopher') ||
       v.name.includes('Jenny') ||
-      v.name.includes('Guy') ||
-      v.name.includes('Daniel') ||
-      v.name.includes('Google UK English Male') ||
-      v.name.includes('Google US English') ||
-      v.name.includes('Samantha')
-    ) || voices.find(v => v.lang.startsWith('en')) || voices[0];
+      v.name.includes('Natural') ||
+      v.name.includes('Google') ||
+      v.name.includes('Daniel')
+    ) || rawVoices[0];
 
-    if (preferredVoice) {
-      utt.voice = preferredVoice;
+    if (chosenVoice) {
+      utt.voice = chosenVoice;
     }
 
-    utt.rate = 1.0;
-    utt.pitch = 0.98; // Slightly lower pitch gives an executive, confident feel
+    utt.rate = Math.max(0.7, Math.min(rate, 1.4));
+    utt.pitch = Math.max(0.7, Math.min(pitch, 1.3));
     utt.volume = 1.0;
 
     // Simulate animated speech amplitude waveform during browser TTS
     let ampTimer: number;
     function simulateVoiceWaveform() {
-      const randomAmp = 0.2 + Math.random() * 0.7;
+      const randomAmp = 0.25 + Math.random() * 0.65;
       setAmplitude(randomAmp);
-      ampTimer = window.setTimeout(simulateVoiceWaveform, 90);
+      ampTimer = window.setTimeout(simulateVoiceWaveform, 85);
     }
 
     utt.onstart = () => {
@@ -371,96 +459,31 @@ export function useVoice(onTranscript?: (text: string) => void) {
 
     setVoiceState('speaking');
     window.speechSynthesis.speak(utt);
-  }, []);
+  }, [selectedVoiceId, rate, pitch]);
 
   /**
-   * Speaks text using OpenAI Neural Studio TTS, with seamless fallback to Browser Natural TTS.
+   * Main speak function: tries browser synthesis with the user's selected voice
    */
   const speak = useCallback(async (text: string, onEnd?: () => void) => {
     stopSpeaking();
-    const clean = cleanSpokenText(text);
-    if (!clean) {
-      onEnd?.();
-      return;
-    }
-
-    setVoiceState('speaking');
-
-    try {
-      // Attempt ultra-realistic OpenAI Neural TTS
-      const res = await fetch('/api/tts', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ text: clean, voice: selectedVoice }),
-      });
-
-      if (!res.ok) {
-        throw new Error('OpenAI TTS unavailable');
-      }
-
-      const blob = await res.blob();
-      const audioUrl = URL.createObjectURL(blob);
-      const audio = new Audio(audioUrl);
-      currentAudioRef.current = audio;
-
-      // Connect HTMLAudio to Web Audio API for real-time waveform visualization
-      try {
-        const AudioCtx = window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
-        const ctx = new AudioCtx();
-        audioContextRef.current = ctx;
-
-        const source = ctx.createMediaElementSource(audio);
-        const analyser = ctx.createAnalyser();
-        analyser.fftSize = 128;
-        source.connect(analyser);
-        analyser.connect(ctx.destination);
-
-        const data = new Uint8Array(analyser.frequencyBinCount);
-        function trackAudio() {
-          if (!analyser) return;
-          analyser.getByteFrequencyData(data);
-          const avg = data.reduce((a, b) => a + b, 0) / data.length;
-          setAmplitude(Math.min(avg / 60, 1));
-          animFrameRef.current = requestAnimationFrame(trackAudio);
-        }
-        trackAudio();
-      } catch {
-        // Direct playback without WebAudio graph if CORS/AudioContext restricted
-      }
-
-      audio.onended = () => {
-        cancelAnimationFrame(animFrameRef.current);
-        setVoiceState('idle');
-        setAmplitude(0);
-        currentAudioRef.current = null;
-        URL.revokeObjectURL(audioUrl);
-        onEnd?.();
-      };
-
-      audio.onerror = () => {
-        // Fallback to browser synthesis on audio playback error
-        speakWithBrowser(text, onEnd);
-      };
-
-      await audio.play();
-    } catch {
-      // Fallback directly to high-quality browser Web Speech API
-      speakWithBrowser(text, onEnd);
-    }
-  }, [selectedVoice, speakWithBrowser, stopSpeaking]);
+    speakWithBrowser(text, onEnd);
+  }, [speakWithBrowser, stopSpeaking]);
 
   return {
     voiceState,
     setVoiceState,
     transcript,
     amplitude,
-    selectedVoice,
-    setSelectedVoice,
-    voicesLoaded,
+    availableVoices,
+    selectedVoiceId,
+    setSelectedVoiceId: handleSetVoice,
+    rate,
+    setRate: handleSetRate,
+    pitch,
+    setPitch: handleSetPitch,
     startListening,
     stopListening,
     speak,
     stopSpeaking,
-    speakWithBrowser,
   };
 }

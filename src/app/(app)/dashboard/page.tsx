@@ -22,6 +22,8 @@ import {
   ExternalLink,
   Shield,
   Eye,
+  Settings2,
+  Sliders,
 } from 'lucide-react';
 import { useDashboardStats, useCDTrackData } from '@/lib/hooks/useDashboardStats';
 import { useVoice } from '@/lib/hooks/useVoice';
@@ -44,13 +46,18 @@ export default function DashboardPage() {
 
   // Voice integration
   const [lastVoiceResponse, setLastVoiceResponse] = useState('');
-  const [autoSpeakChat, setAutoSpeakChat] = useState(false);
+  const [showVoiceSettings, setShowVoiceSettings] = useState(false);
   const {
     voiceState,
     setVoiceState,
     amplitude,
-    selectedVoice,
-    setSelectedVoice,
+    availableVoices,
+    selectedVoiceId,
+    setSelectedVoiceId,
+    rate,
+    setRate,
+    pitch,
+    setPitch,
     startListening,
     stopListening,
     speak,
@@ -115,8 +122,15 @@ export default function DashboardPage() {
     if (voiceState === 'speaking') {
       stopSpeaking();
     } else {
-      speak(`Good day, Master. I am B.A.N., your artificial navigator for CD TRACK. All database connections are active and standing by.`);
+      speak(`Good day, Master. I am B.A.N., your artificial navigator. How does this voice sound to you?`);
     }
+  }
+
+  function handleVoiceChange(newId: string) {
+    setSelectedVoiceId(newId);
+    setTimeout(() => {
+      speak(`Voice profile updated, Master.`);
+    }, 150);
   }
 
   function handleRefreshAll() {
@@ -232,33 +246,96 @@ export default function DashboardPage() {
             </span>
           </div>
 
-          {/* Voice Persona Selector & Quick Test */}
-          <div className="flex items-center justify-between gap-2 px-3 py-2 rounded-xl bg-white/[0.03] border border-white/8 text-xs mb-3">
-            <div className="flex items-center gap-1.5">
-              <span className="text-slate-400 text-[11px]">Persona:</span>
-              <select
-                value={selectedVoice}
-                onChange={(e) => setSelectedVoice(e.target.value as typeof selectedVoice)}
-                className="bg-slate-900/80 border border-white/10 text-cyan-300 rounded-lg px-2 py-1 text-xs focus:outline-none focus:border-cyan-400 font-medium"
-              >
-                <option value="onyx">Onyx (Executive Deep)</option>
-                <option value="nova">Nova (Warm & Energetic)</option>
-                <option value="alloy">Alloy (Refined Neutral)</option>
-                <option value="echo">Echo (Calm Advisor)</option>
-                <option value="fable">Fable (British Diplomat)</option>
-                <option value="shimmer">Shimmer (Expressive)</option>
-              </select>
+          {/* Voice Engine Selector & Settings Toggle */}
+          <div className="flex flex-col gap-2 p-3 rounded-xl bg-white/[0.03] border border-white/8 text-xs mb-3">
+            <div className="flex items-center justify-between gap-2">
+              <div className="flex items-center gap-1.5 flex-1 min-w-0">
+                <span className="text-slate-400 text-[11px] shrink-0 font-medium">Voice:</span>
+                <select
+                  value={selectedVoiceId}
+                  onChange={(e) => handleVoiceChange(e.target.value)}
+                  className="bg-slate-900/90 border border-white/12 text-cyan-300 rounded-lg px-2.5 py-1 text-xs focus:outline-none focus:border-cyan-400 font-medium w-full truncate"
+                  title="Choose your preferred assistant voice"
+                >
+                  {availableVoices.length === 0 ? (
+                    <option value="">Loading system voices...</option>
+                  ) : (
+                    availableVoices.map((v) => (
+                      <option key={v.id} value={v.id}>
+                        {v.isNatural ? '✨ ' : ''}{v.name} ({v.lang})
+                      </option>
+                    ))
+                  )}
+                </select>
+              </div>
+
+              <div className="flex items-center gap-1 shrink-0">
+                <button
+                  onClick={() => setShowVoiceSettings(!showVoiceSettings)}
+                  className={cn(
+                    'p-1.5 rounded-lg border transition-all',
+                    showVoiceSettings
+                      ? 'bg-primary-500/25 border-primary-500/40 text-primary-300'
+                      : 'bg-white/5 border-white/10 text-slate-400 hover:text-slate-200'
+                  )}
+                  title="Voice Tuning (Speed & Pitch)"
+                >
+                  <Sliders className="w-3.5 h-3.5" />
+                </button>
+
+                <button
+                  onClick={handleTestVoice}
+                  disabled={voiceState === 'thinking'}
+                  className="px-2.5 py-1 rounded-lg bg-primary-500/15 hover:bg-primary-500/25 border border-primary-500/30 text-primary-300 text-[11px] font-medium transition-all flex items-center gap-1 shrink-0"
+                  title="Test selected voice"
+                >
+                  <Volume2 className="w-3 h-3 text-cyan-400" />
+                  <span>{voiceState === 'speaking' ? 'Stop' : 'Test'}</span>
+                </button>
+              </div>
             </div>
 
-            <button
-              onClick={handleTestVoice}
-              disabled={voiceState === 'thinking'}
-              className="px-2.5 py-1 rounded-lg bg-primary-500/15 hover:bg-primary-500/25 border border-primary-500/30 text-primary-300 text-[11px] font-medium transition-all flex items-center gap-1"
-              title="Test B.A.N.'s voice synthesis"
-            >
-              <Volume2 className="w-3 h-3 text-cyan-400" />
-              <span>{voiceState === 'speaking' ? 'Stop' : 'Test Voice'}</span>
-            </button>
+            {/* Expandable Voice Tuning Controls */}
+            <AnimatePresence>
+              {showVoiceSettings && (
+                <motion.div
+                  initial={{ opacity: 0, height: 0 }}
+                  animate={{ opacity: 1, height: 'auto' }}
+                  exit={{ opacity: 0, height: 0 }}
+                  className="pt-2.5 border-t border-white/8 space-y-2 overflow-hidden"
+                >
+                  <div className="flex items-center justify-between text-[11px] text-slate-400">
+                    <span>Speed / Pace: <strong className="text-cyan-300 font-mono">{rate.toFixed(2)}x</strong></span>
+                    <span>Pitch: <strong className="text-primary-300 font-mono">{pitch.toFixed(2)}</strong></span>
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-3">
+                    <div>
+                      <input
+                        type="range"
+                        min="0.75"
+                        max="1.3"
+                        step="0.05"
+                        value={rate}
+                        onChange={(e) => setRate(parseFloat(e.target.value))}
+                        className="w-full accent-cyan-400 h-1 bg-white/10 rounded-lg cursor-pointer"
+                      />
+                    </div>
+                    <div>
+                      <input
+                        type="range"
+                        min="0.75"
+                        max="1.25"
+                        step="0.05"
+                        value={pitch}
+                        onChange={(e) => setPitch(parseFloat(e.target.value))}
+                        className="w-full accent-primary-400 h-1 bg-white/10 rounded-lg cursor-pointer"
+                      />
+                    </div>
+                  </div>
+                </motion.div>
+              )}
+            </AnimatePresence>
           </div>
 
           {/* Voice Orb */}
