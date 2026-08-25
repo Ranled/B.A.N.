@@ -1,5 +1,5 @@
 import { NextRequest } from 'next/server';
-import { openai, OPENAI_MODEL, buildSystemPrompt, BAN_TOOLS } from '@/lib/openai/client';
+import { openai, getActiveModel, buildSystemPrompt, BAN_TOOLS } from '@/lib/openai/client';
 import { createAdminClient } from '@/lib/supabase/admin';
 import { createClient as createServerClient } from '@/lib/supabase/server';
 import type { ChatCompletionMessageParam } from 'openai/resources/chat/completions';
@@ -271,7 +271,7 @@ export async function POST(request: NextRequest) {
 
       try {
         const response = await openai.chat.completions.create({
-          model: OPENAI_MODEL,
+          model: getActiveModel(),
           messages: openaiMessages,
           tools: BAN_TOOLS,
           tool_choice: 'auto',

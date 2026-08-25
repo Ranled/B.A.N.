@@ -39,10 +39,27 @@ export function getOpenAIClient(): OpenAI {
 }
 
 export function getActiveModel(): string {
-  if (process.env.OPENAI_MODEL) return process.env.OPENAI_MODEL;
+  let model = process.env.OPENAI_MODEL;
+  if (!model && typeof process !== 'undefined') {
+    try {
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      const fs = require('fs');
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      const path = require('path');
+      const envPath = path.resolve(process.cwd(), '.env.local');
+      if (fs.existsSync(envPath)) {
+        const fileContent = fs.readFileSync(envPath, 'utf8');
+        const match = fileContent.match(/OPENAI_MODEL\s*=\s*(.+)/);
+        if (match && match[1]) {
+          model = match[1].trim().replace(/^["']|["']$/g, '');
+        }
+      }
+    } catch {}
+  }
+  if (model) return model;
   const rawKey = process.env.OPENAI_API_KEY || '';
   if (rawKey.startsWith('AQ.') || rawKey.startsWith('AIzaSy')) {
-    return 'gemini-3.6-flash';
+    return 'gemini-3.5-flash';
   }
   return 'gpt-4o-mini';
 }
@@ -59,7 +76,7 @@ export const openai = new Proxy({} as OpenAI, {
   },
 });
 
-export const OPENAI_MODEL = process.env.OPENAI_MODEL || 'gemini-3.6-flash';
+export const OPENAI_MODEL = 'gemini-3.5-flash';
 
 export function buildSystemPrompt(stats?: DashboardStats | null): string {
   const now = new Date();
