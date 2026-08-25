@@ -1,8 +1,24 @@
 import OpenAI from 'openai';
 import { DashboardStats } from '@/types';
 
-export const openai = new OpenAI({
-  apiKey: process.env.OPENAI_API_KEY || 'sk-placeholder-key-for-build',
+export function getOpenAIClient(): OpenAI {
+  const rawKey = process.env.OPENAI_API_KEY;
+  if (!rawKey || rawKey.includes('placeholder') || rawKey.includes('your-openai-api-key') || rawKey.trim() === '') {
+    throw new Error('OPENAI_API_KEY is not configured in .env.local. Please provide a valid OpenAI API key.');
+  }
+  return new OpenAI({ apiKey: rawKey.trim() });
+}
+
+// Dynamic Proxy to always fetch fresh client per request without stale evaluation
+export const openai = new Proxy({} as OpenAI, {
+  get(_target, prop: keyof OpenAI) {
+    const client = getOpenAIClient();
+    const val = client[prop];
+    if (typeof val === 'function') {
+      return (val as (...args: unknown[]) => unknown).bind(client);
+    }
+    return val;
+  },
 });
 
 export const OPENAI_MODEL = process.env.OPENAI_MODEL || 'gpt-4o-mini';
