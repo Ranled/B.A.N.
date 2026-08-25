@@ -25,9 +25,26 @@ export function getOpenAIClient(): OpenAI {
   }
 
   if (!rawKey || rawKey.includes('placeholder') || rawKey.includes('your-openai-api-key') || rawKey.trim() === '') {
-    throw new Error('OPENAI_API_KEY is not configured in .env.local. Please provide a valid OpenAI API key.');
+    throw new Error('OPENAI_API_KEY is not configured in .env.local. Please provide a valid API key.');
   }
-  return new OpenAI({ apiKey: rawKey.trim() });
+
+  const cleanKey = rawKey.trim();
+  const isGoogleKey = cleanKey.startsWith('AQ.') || cleanKey.startsWith('AIzaSy');
+  const baseURL = process.env.OPENAI_BASE_URL || (isGoogleKey ? 'https://generativelanguage.googleapis.com/v1beta/openai/' : undefined);
+
+  return new OpenAI({
+    apiKey: cleanKey,
+    baseURL: baseURL,
+  });
+}
+
+export function getActiveModel(): string {
+  if (process.env.OPENAI_MODEL) return process.env.OPENAI_MODEL;
+  const rawKey = process.env.OPENAI_API_KEY || '';
+  if (rawKey.startsWith('AQ.') || rawKey.startsWith('AIzaSy')) {
+    return 'gemini-3.6-flash';
+  }
+  return 'gpt-4o-mini';
 }
 
 // Dynamic Proxy to always fetch fresh client per request without stale evaluation
@@ -42,7 +59,7 @@ export const openai = new Proxy({} as OpenAI, {
   },
 });
 
-export const OPENAI_MODEL = process.env.OPENAI_MODEL || 'gpt-4o-mini';
+export const OPENAI_MODEL = process.env.OPENAI_MODEL || 'gemini-3.6-flash';
 
 export function buildSystemPrompt(stats?: DashboardStats | null): string {
   const now = new Date();
