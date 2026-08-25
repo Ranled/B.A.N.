@@ -2,7 +2,28 @@ import OpenAI from 'openai';
 import { DashboardStats } from '@/types';
 
 export function getOpenAIClient(): OpenAI {
-  const rawKey = process.env.OPENAI_API_KEY;
+  let rawKey = process.env.OPENAI_API_KEY;
+
+  // Fallback: If process.env didn't reload yet in running dev server, read .env.local directly
+  if (!rawKey && typeof process !== 'undefined') {
+    try {
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      const fs = require('fs');
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      const path = require('path');
+      const envPath = path.resolve(process.cwd(), '.env.local');
+      if (fs.existsSync(envPath)) {
+        const fileContent = fs.readFileSync(envPath, 'utf8');
+        const match = fileContent.match(/OPENAI_API_KEY\s*=\s*(.+)/);
+        if (match && match[1]) {
+          rawKey = match[1].trim().replace(/^["']|["']$/g, '');
+        }
+      }
+    } catch {
+      // Ignore file system errors
+    }
+  }
+
   if (!rawKey || rawKey.includes('placeholder') || rawKey.includes('your-openai-api-key') || rawKey.trim() === '') {
     throw new Error('OPENAI_API_KEY is not configured in .env.local. Please provide a valid OpenAI API key.');
   }
