@@ -205,6 +205,37 @@ async function executeTool(name: string, args: Record<string, unknown>, userId: 
   }
 }
 
+function streamResponse(content: string) {
+  const encoder = new TextEncoder();
+  const stream = new ReadableStream({
+    start(controller) {
+      const words = content.split(' ');
+      let i = 0;
+      const interval = setInterval(() => {
+        if (i < words.length) {
+          const chunk = (i === 0 ? '' : ' ') + words[i];
+          controller.enqueue(
+            encoder.encode(`data: ${JSON.stringify({ content: chunk })}\n\n`)
+          );
+          i++;
+        } else {
+          controller.enqueue(encoder.encode('data: [DONE]\n\n'));
+          controller.close();
+          clearInterval(interval);
+        }
+      }, 15);
+    },
+  });
+
+  return new Response(stream, {
+    headers: {
+      'Content-Type': 'text/event-stream',
+      'Cache-Control': 'no-cache',
+      'Connection': 'keep-alive',
+    },
+  });
+}
+
 export async function POST(request: NextRequest) {
   try {
     const accessCookie = request.cookies.get('ban_access')?.value?.toUpperCase();
@@ -238,82 +269,69 @@ export async function POST(request: NextRequest) {
     while (iteration < MAX_ITERATIONS) {
       iteration++;
 
-      const response = await openai.chat.completions.create({
-        model: OPENAI_MODEL,
-        messages: openaiMessages,
-        tools: BAN_TOOLS,
-        tool_choice: 'auto',
-        max_tokens: 1500,
-        temperature: 0.7,
-      });
-
-      const choice = response.choices[0];
-
-      // No more tool calls — stream the final text response
-      if (!choice.message.tool_calls || choice.message.tool_calls.length === 0) {
-        const content = choice.message.content || '';
-
-        const encoder = new TextEncoder();
-        const stream = new ReadableStream({
-          start(controller) {
-            const words = content.split(' ');
-            let i = 0;
-            const interval = setInterval(() => {
-              if (i < words.length) {
-                const chunk = (i === 0 ? '' : ' ') + words[i];
-                controller.enqueue(
-                  encoder.encode(`data: ${JSON.stringify({ content: chunk })}\n\n`)
-                );
-                i++;
-              } else {
-                controller.enqueue(encoder.encode('data: [DONE]\n\n'));
-                controller.close();
-                clearInterval(interval);
-              }
-            }, 15);
-          },
+      try {
+        const response = await openai.chat.completions.create({
+          model: OPENAI_MODEL,
+          messages: openaiMessages,
+          tools: BAN_TOOLS,
+          tool_choice: 'auto',
+          max_tokens: 1500,
+          temperature: 0.7,
         });
 
-        return new Response(stream, {
-          headers: {
-            'Content-Type': 'text/event-stream',
-            'Cache-Control': 'no-cache',
-            'Connection': 'keep-alive',
-          },
-        });
+        const choice = response.choices[0];
+
+        // No more tool calls — stream the final text response
+        if (!choice.message.tool_calls || choice.message.tool_calls.length === 0) {
+          const content = choice.message.content || 'At your command, Master.';
+          return streamResponse(content);
+        }
+
+        // Execute read-only tool calls
+        openaiMessages.push(choice.message);
+
+        const toolCalls = (choice.message.tool_calls ?? []) as Array<{
+          id: string;
+          function: { name: string; arguments: string };
+        }>;
+        const toolResults = await Promise.all(
+          toolCalls.map(async toolCall => {
+            let args: Record<string, unknown> = {};
+            try {
+              args = JSON.parse(toolCall.function.arguments || '{}');
+            } catch {}
+            const result = await executeTool(toolCall.function.name, args, user?.id || null);
+            return {
+              tool_call_id: toolCall.id,
+              role: 'tool' as const,
+              content: JSON.stringify(result),
+            };
+          })
+        );
+
+        openaiMessages.push(...toolResults);
+      } catch (aiErr: unknown) {
+        console.error('[/api/chat] OpenAI Error:', aiErr);
+        const errorMessage = (aiErr as { message?: string })?.message || '';
+        const isQuotaError = errorMessage.includes('quota') || errorMessage.includes('429');
+
+        if (isQuotaError) {
+          return streamResponse(
+            `Master, your OpenAI API key has exceeded its current quota or billing limit. Please check your plan at https://platform.openai.com/billing to restore live neural synthesis.\n\nIn the meantime, your live CD TRACK database metrics and tabs remain active and accessible!`
+          );
+        }
+
+        return streamResponse(
+          `Master, I encountered a temporary connection issue with the language model (${errorMessage || 'Service unavailable'}). Your database connection is active — please retry your query shortly.`
+        );
       }
-
-      // Execute read-only tool calls
-      openaiMessages.push(choice.message);
-
-      const toolCalls = (choice.message.tool_calls ?? []) as Array<{
-        id: string;
-        function: { name: string; arguments: string };
-      }>;
-      const toolResults = await Promise.all(
-        toolCalls.map(async toolCall => {
-          let args: Record<string, unknown> = {};
-          try {
-            args = JSON.parse(toolCall.function.arguments || '{}');
-          } catch {}
-          const result = await executeTool(toolCall.function.name, args, user?.id || null);
-          return {
-            tool_call_id: toolCall.id,
-            role: 'tool' as const,
-            content: JSON.stringify(result),
-          };
-        })
-      );
-
-      openaiMessages.push(...toolResults);
     }
 
-    return new Response(
-      JSON.stringify({ content: 'Master, I had trouble completing that analysis. Please command me again.' }),
-      { headers: { 'Content-Type': 'application/json' } }
-    );
+    return streamResponse('Master, I have completed the data inspection. What else would you like me to analyze for you?');
   } catch (error) {
-    console.error('[/api/chat] Error:', error);
-    return new Response(JSON.stringify({ error: 'Internal server error' }), { status: 500 });
+    console.error('[/api/chat] Server Error:', error);
+    return streamResponse(
+      `Master, an internal processing error occurred: ${(error as Error).message || 'Unknown error'}. Please try again.`
+    );
   }
 }

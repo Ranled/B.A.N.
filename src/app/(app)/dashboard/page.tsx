@@ -44,10 +44,13 @@ export default function DashboardPage() {
 
   // Voice integration
   const [lastVoiceResponse, setLastVoiceResponse] = useState('');
+  const [autoSpeakChat, setAutoSpeakChat] = useState(false);
   const {
     voiceState,
     setVoiceState,
     amplitude,
+    selectedVoice,
+    setSelectedVoice,
     startListening,
     stopListening,
     speak,
@@ -66,7 +69,10 @@ export default function DashboardPage() {
         }),
       });
 
-      if (!res.body) return;
+      if (!res.body) {
+        setVoiceState('idle');
+        return;
+      }
       const reader = res.body.getReader();
       const decoder = new TextDecoder();
       let fullText = '';
@@ -88,7 +94,7 @@ export default function DashboardPage() {
       }
 
       setLastVoiceResponse(fullText);
-      speak(fullText, () => setVoiceState('idle'));
+      await speak(fullText, () => setVoiceState('idle'));
     } catch {
       setVoiceState('idle');
     }
@@ -102,6 +108,14 @@ export default function DashboardPage() {
     } else if (voiceState === 'idle') {
       setLastVoiceResponse('');
       startListening();
+    }
+  }
+
+  function handleTestVoice() {
+    if (voiceState === 'speaking') {
+      stopSpeaking();
+    } else {
+      speak(`Good day, Master. I am B.A.N., your artificial navigator for CD TRACK. All database connections are active and standing by.`);
     }
   }
 
@@ -218,8 +232,37 @@ export default function DashboardPage() {
             </span>
           </div>
 
+          {/* Voice Persona Selector & Quick Test */}
+          <div className="flex items-center justify-between gap-2 px-3 py-2 rounded-xl bg-white/[0.03] border border-white/8 text-xs mb-3">
+            <div className="flex items-center gap-1.5">
+              <span className="text-slate-400 text-[11px]">Persona:</span>
+              <select
+                value={selectedVoice}
+                onChange={(e) => setSelectedVoice(e.target.value as typeof selectedVoice)}
+                className="bg-slate-900/80 border border-white/10 text-cyan-300 rounded-lg px-2 py-1 text-xs focus:outline-none focus:border-cyan-400 font-medium"
+              >
+                <option value="onyx">Onyx (Executive Deep)</option>
+                <option value="nova">Nova (Warm & Energetic)</option>
+                <option value="alloy">Alloy (Refined Neutral)</option>
+                <option value="echo">Echo (Calm Advisor)</option>
+                <option value="fable">Fable (British Diplomat)</option>
+                <option value="shimmer">Shimmer (Expressive)</option>
+              </select>
+            </div>
+
+            <button
+              onClick={handleTestVoice}
+              disabled={voiceState === 'thinking'}
+              className="px-2.5 py-1 rounded-lg bg-primary-500/15 hover:bg-primary-500/25 border border-primary-500/30 text-primary-300 text-[11px] font-medium transition-all flex items-center gap-1"
+              title="Test B.A.N.'s voice synthesis"
+            >
+              <Volume2 className="w-3 h-3 text-cyan-400" />
+              <span>{voiceState === 'speaking' ? 'Stop' : 'Test Voice'}</span>
+            </button>
+          </div>
+
           {/* Voice Orb */}
-          <div className="my-6 flex flex-col items-center justify-center">
+          <div className="my-3 flex flex-col items-center justify-center">
             <VoiceOrb state={voiceState} amplitude={amplitude} />
             
             <p className="text-xs text-slate-300 font-medium mt-4 text-center">
@@ -252,7 +295,16 @@ export default function DashboardPage() {
                   exit={{ opacity: 0 }}
                   className="mt-3 p-3 rounded-xl glass border border-primary-500/20 text-xs text-slate-200 max-w-sm text-left max-h-36 overflow-y-auto"
                 >
-                  <p className="font-semibold text-primary-400 text-[11px] mb-1">B.A.N. Response:</p>
+                  <div className="flex items-center justify-between mb-1">
+                    <p className="font-semibold text-primary-400 text-[11px]">B.A.N. Spoken Analysis:</p>
+                    <button
+                      onClick={() => speak(lastVoiceResponse)}
+                      className="text-[10px] text-cyan-400 hover:text-cyan-300 flex items-center gap-1"
+                    >
+                      <Volume2 className="w-2.5 h-2.5" />
+                      <span>Replay</span>
+                    </button>
+                  </div>
                   <p className="line-clamp-4 text-slate-300">{lastVoiceResponse}</p>
                 </motion.div>
               )}
@@ -287,7 +339,7 @@ export default function DashboardPage() {
             </motion.button>
 
             <span className="text-[11px] text-slate-500 text-center">
-              {voiceState === 'idle' ? 'Click to start voice command' : 'Click to stop / cancel'}
+              {voiceState === 'idle' ? 'Click to speak to Master Navigator' : 'Click to stop / cancel'}
             </span>
           </div>
         </motion.div>
@@ -318,7 +370,12 @@ export default function DashboardPage() {
           {/* Messages Area */}
           <div className="flex-1 overflow-y-auto p-4 sm:p-5 flex flex-col gap-4">
             {messages.map(msg => (
-              <ChatMessageBubble key={msg.id} message={msg} />
+              <ChatMessageBubble
+                key={msg.id}
+                message={msg}
+                onSpeak={(text) => speak(text)}
+                isSpeaking={voiceState === 'speaking'}
+              />
             ))}
 
             {streaming && messages[messages.length - 1]?.content === '' && (

@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useCallback } from 'react';
 import { createClient } from '@/lib/supabase/client';
-import { DashboardStats, CDEvent, Announcement, Reminder, Note, Profile, Notification } from '@/types';
+import { DashboardStats, CDEvent, Announcement, Reminder, Note, Profile } from '@/types';
 
 export function useDashboardStats() {
   const [stats, setStats] = useState<DashboardStats | null>(null);
@@ -13,6 +13,18 @@ export function useDashboardStats() {
 
   const fetchStats = useCallback(async () => {
     try {
+      // First try fetching through server /api/data route (works for code auth & server auth)
+      const res = await fetch('/api/data', { cache: 'no-store' });
+      if (res.ok) {
+        const json = await res.json();
+        if (json.stats) {
+          setStats(json.stats);
+          setError(null);
+          return;
+        }
+      }
+
+      // Fallback: direct browser Supabase query
       const [
         eventsRes,
         announcementsRes,
@@ -91,12 +103,25 @@ export function useCDTrackData() {
 
   const loadAll = useCallback(async () => {
     try {
+      // First try fetching through server /api/data endpoint
+      const res = await fetch('/api/data', { cache: 'no-store' });
+      if (res.ok) {
+        const json = await res.json();
+        if (json.events) setEvents(json.events);
+        if (json.announcements) setAnnouncements(json.announcements);
+        if (json.reminders) setReminders(json.reminders);
+        if (json.notes) setNotes(json.notes);
+        if (json.profiles) setProfiles(json.profiles);
+        return;
+      }
+
+      // Fallback: direct browser Supabase query
       const [evRes, anRes, rmRes, ntRes, pfRes] = await Promise.all([
-        supabase.from('events').select('*, attachments(*)').order('date', { ascending: true }).limit(20),
-        supabase.from('announcements').select('*').order('is_pinned', { ascending: false }).order('created_at', { ascending: false }).limit(20),
-        supabase.from('reminders').select('*').order('date', { ascending: true }).limit(20),
-        supabase.from('notes').select('*').order('pinned', { ascending: false }).order('updated_at', { ascending: false }).limit(20),
-        supabase.from('profiles').select('*').order('created_at', { ascending: false }).limit(20),
+        supabase.from('events').select('*, attachments(*)').order('date', { ascending: true }).limit(50),
+        supabase.from('announcements').select('*').order('is_pinned', { ascending: false }).order('created_at', { ascending: false }).limit(50),
+        supabase.from('reminders').select('*').order('date', { ascending: true }).limit(50),
+        supabase.from('notes').select('*').order('pinned', { ascending: false }).order('updated_at', { ascending: false }).limit(50),
+        supabase.from('profiles').select('*').order('created_at', { ascending: false }).limit(50),
       ]);
 
       if (evRes.data) setEvents(evRes.data);
